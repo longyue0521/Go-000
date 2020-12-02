@@ -32,7 +32,8 @@ func DBQuery() (int, error) {
 func main() {
 	i, err := IntService()
 	if err != nil {
-		fmt.Printf("%+v\n\n%+v", xerrors.Cause(err), err)
+		// 上层代码无法获取sql.ErrNoRows，仅可在日志中查看
+		fmt.Printf("%+v\n\n %+v\n\n %+v", xerrors.Cause(err), errors.Unwrap(err), err)
 	}
 	fmt.Println(i)
 }
