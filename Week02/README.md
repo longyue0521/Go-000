@@ -14,8 +14,8 @@
 当上层代码确保不会通过`errors.Is`或`errors.As`解开dao层抛出的经过包装的`sql.ErrNoRows`时，可以包装`sql.ErrNoRows`抛给上层并在最上层使用`%+v`记录日志，用于出错时排查问题。但这需要团队达成共识，并用代码审查等机制监督。
 
 ```go
-func UserDaoGetUserByID(uid int) (user User, err error) {
-    var user User
+func UserDaoGetUserByID(uid int) (user *User, err error) {
+    var user *User
     rows, err := db.Query(sqlString, uid)
 	if err != nil {
         // 包装向上抛，携带sql语句
@@ -32,8 +32,8 @@ func UserDaoGetUserByID(uid int) (user User, err error) {
 如果dao层不认为`sql.ErrNoRows`是错误或者说将它与其他类型错误区别对待，不对`sql.ErrNoRows`Wrap也不向上抛，而是做降级处理，接收过旧项目就是这么写的。
 
 ```go
-func UserDaoGetUserByID(uid int) (user User, err error) {
-    var user User
+func UserDaoGetUserByID(uid int) (user *User, err error) {
+    var user *User
     rows, err := db.Query(sqlString, uid)
     // 区别对待
     if err == sql.ErrNoRows {
@@ -53,19 +53,18 @@ func UserDaoGetUserByID(uid int) (user User, err error) {
 
 情况三：
 
-为了让上层代码对底层所用数据库无感知，而仅在排查错误时可以通过日志查看到所用数据库中的错误信息，故吞掉`sql.ErrNoRows`转而包装dao层自定义的根错误再向上抛，并携带数据库报错信息。
+为了让上层代码对底层所用数据库无感知、不对底层数据库错误进行硬编码而仅在排查错误时可以通过日志查看到所用数据库产生的错误信息，故用dao层自定义的根错误替换掉`sql.ErrNoRows`再包装再向上抛，包装时将数据库报错信息写入携带信息中。
 
 ```go
 var ErrUserNotFound = errors.New("user dao: user not found")
 
-func UserDaoGetUserByID(uid int) (user User, err error) {
-    var user User
+func UserDaoGetUserByID(uid int) (user *User, err error) {
+    var user *User
     rows, err := db.Query(sqlString, uid)
 	if err != nil {
-        // 用dao层自定义错误替换err，包装向上抛
-        // 并将err信息写入附带信息里
-        // 上层代码Unwrap得到也只是ErrUserNotFound
-		return nil, errors.Wrapf(ErrUserNotFound, "with sql %s got db error %s", sqlString, err)
+        // 对dao层自定义错误ErrUserNotFound包装向上抛，包装过程中将err信息写入附带信息里
+        // 即使上层代码Unwrap得到也只是ErrUserNotFound
+	    return nil, errors.Wrapf(ErrUserNotFound, "with sql %s got db error %s", sqlString, err)
 	}
     defer rows.Close()
     .....
