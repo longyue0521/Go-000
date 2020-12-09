@@ -49,7 +49,7 @@ func main() {
 			}
 		}()
 
-		err = server.ListenAndServe()
+		err = xerrors.WithStack(server.ListenAndServe())
 		return
 	})
 
@@ -74,10 +74,10 @@ func main() {
 		case <-quit:
 			// 退出信号，优雅关闭
 			// 此后server.ListenAndServe直接返回ErrServerClosed
-			err = server.Shutdown(context.Background())
+			err = xerrors.WithStack(server.Shutdown(context.Background()))
 		case <-ctx.Done():
 			// 异常情况，优雅关闭
-			err = server.Shutdown(context.Background())
+			err = xerrors.WithStack(server.Shutdown(context.Background()))
 		}
 		return
 	})
