@@ -26,41 +26,31 @@ func main() {
 		fmt.Fprint(w, "Welcome Week03 Go! Go! Go!")
 	})
 
-	g := new(errgroup.Group)
-	sig := make(chan os.Signal, 1)
+	g, ctx := errgroup.WithContext(context.Background())
 
-	// 注册linux信号
+	// 注册监听的信号
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGHUP, syscall.SIGINT, syscall.SIGQUIT)
+
+	// Start Server
 	g.Go(func() (err error) {
 		// errgroup不处理panic，因此要在此方法内处理
+		// 小技巧：使用命名返回值，在defer内可以修改最终的返回值err
 		defer func() {
 			if r := recover(); r != nil {
 				buf := make([]byte, 64<<10)
 				buf = buf[:runtime.Stack(buf, false)]
-				err = xerrors.New(fmt.Sprintf("signal notify: panic recovered: %s\n%s", r, buf))
-			}
-		}()
-		// 注册监听的信号
-		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-		return nil
-	})
-
-	// Server Setup
-	g.Go(func() (err error) {
-		// errgroup不处理panic，因此要在此方法内处理
-		defer func() {
-
-			if r := recover(); r != nil {
-				buf := make([]byte, 64<<10)
-				buf = buf[:runtime.Stack(buf, false)]
-				errStr := fmt.Sprintf("server setup: panic recovered: %s\n%s", r, buf)
+				errStr := fmt.Sprintf("Server ListenAndServe: panic recovered: %s\n%s", r, buf)
 				if err != nil {
 					err = xerrors.Wrap(err, errStr)
+					return
 				}
 				err = xerrors.New(errStr)
 			}
 		}()
+
 		err = server.ListenAndServe()
-		return err
+		return
 	})
 
 	// Server Shutdown
@@ -70,24 +60,31 @@ func main() {
 			if r := recover(); r != nil {
 				buf := make([]byte, 64<<10)
 				buf = buf[:runtime.Stack(buf, false)]
-				errStr := fmt.Sprintf("server shutdown: panic recovered: %s\n%s", r, buf)
+				errStr := fmt.Sprintf("Server Shutdown/Close: panic recovered: %s\n%s", r, buf)
 				if err != nil {
 					err = xerrors.Wrap(err, errStr)
+					return
 				}
 				err = xerrors.New(errStr)
 			}
 		}()
 
-		// 阻塞等待结束信号
-		<-sig
-		// 优雅关闭
-		err = server.Shutdown(context.Background())
-		return err
+		// 阻塞等待
+		select {
+		case <-quit:
+			// 退出信号，优雅关闭
+			// 此后server.ListenAndServe直接返回ErrServerClosed
+			err = server.Shutdown(context.Background())
+		case <-ctx.Done():
+			// 异常情况，优雅关闭
+			err = server.Shutdown(context.Background())
+		}
+		return
 	})
 
-	if err := g.Wait(); err != http.ErrServerClosed {
-		fmt.Println(err)
-	} else {
+	if err := g.Wait(); xerrors.Is(err, http.ErrServerClosed) {
 		fmt.Println("HTTP Server Shutdown Gracefully...")
+	} else {
+		fmt.Println(err)
 	}
 }
